@@ -14,6 +14,7 @@ import time
 import sys
 from filesys.dirs import clsFile
 import sqlite3
+import shutil
 
 #-------------------------------------------------------------------------------
 #Variables Globales
@@ -22,7 +23,9 @@ verbose = True
 log = True
 logfile = "sync-"
 database = "sync.db"
-Job_Id = 0
+Id_Job = 0
+LastSync=""
+FirstSync = True
 
 #-------------------------------------------------------------------------------
 #Definicion de Funciones
@@ -39,22 +42,66 @@ def CreaDataBase():
     db.commit()
     db.close()
 
-def GetIdJob(DirOrigen,DirDestino):
-    global Job_Id
+def GetJob(DirOrigen,DirDestino):
+    global Id_Job,LastSync,FirstSync
 
     db = sqlite3.connect(database)
     cur = db.cursor()
     cur.execute("""select count(Id_Job) from Job where DirOrigen = ? and DirDestino = ? """,(DirOrigen,DirDestino))
     count = cur.fetchone()[0]
     if count==0:
-        Job_Id=1
-        cur.execute("""Insert into Job (Id_Job,DirOrigen,DirDestino) Values(?,?,?)""",(Job_Id,DirOrigen,DirDestino))
+        Id_Job = 1
+        FirstSync = True
+        cur.execute("""Insert into Job (Id_Job,DirOrigen,DirDestino) Values(?,?,?)""",(Id_Job,DirOrigen,DirDestino))
         db.commit()
     else:
-        cur.execute("""select Id_Job from Job where DirOrigen = ? and DirDestino = ? """,(DirOrigen,DirDestino))
-        Job_Id = cur.fetchone()[0]
+        FirstSync = False
+        cur.execute("""select Id_Job,LastSync from Job where DirOrigen = ? and DirDestino = ? """,(DirOrigen,DirDestino))
+        row = cur.fetchone()
+        Id_Job = row[0]
+        if row[1] != "None":
+            LastSync = row[1]
     db.close()
 
+def UpdateLastSync():
+    global Id_Job, LastSync
+
+    db = sqlite3.connect(database)
+    cur = db.cursor()
+    cur.execute("""Update Job Set LastSync = ? where Id_Job = ? """,(LastSync,Id_Job))
+    db.commit()
+    db.close()
+
+def InsertDet(IsDir,IsFile,NombreBaseOrigen,NombreOrigen,NombreBaseDestino,NombreDestino):
+    global Id_Job
+    try:
+        db = sqlite3.connect(database)
+        cur = db.cursor()
+        db.text_factory = str
+        cur.execute("""Insert into Job_Det (
+                        Id_Job,
+                        IsDir,
+                        IsFile,
+                        NombreBaseOrigen,
+                        NombreOrigen,
+                        NombreBaseDestino,
+                        NombreDestino)
+                        Values (?,?,?,?,?,?,?) """,
+                        (Id_Job,IsDir,IsFile,NombreBaseOrigen,NombreOrigen,NombreBaseDestino,NombreDestino))
+        db.commit()
+    except sqlite3.Error, e:
+        print "Error %s:" % e.args[0]
+
+    db.close()
+
+def BorraDet():
+    global Id_Job
+
+    db = sqlite3.connect(database)
+    cur = db.cursor()
+    cur.execute("""Delete from Job_Det Where Id_Job = ? """ , (Id_Job,))
+    db.commit()
+    db.close()
 
 def CreaLog():
     FLog = open(logfile,"w")
@@ -73,12 +120,104 @@ def printMSG(msg):
 def CreaTree(DirOrigen,DirDestino,ObjDestino):
     printMSG("   CMD:")
     printMSG("        mkdir " + os.path.join(DirDestino,ObjDestino))
+    cpDir(os.path.join(DirOrigen,ObjDestino),os.path.join(DirDestino,ObjDestino))
     for obj in os.listdir(os.path.join(DirOrigen,ObjDestino)):
         FullNameOrigen = os.path.join(DirOrigen,ObjDestino,obj)
         if os.path.isfile(FullNameOrigen):
             printMSG("        cp " + FullNameOrigen + " " + os.path.join(DirDestino,ObjDestino))
+            cpFile(FullNameOrigen,os.path.join(DirDestino,ObjDestino))
         if os.path.isdir(FullNameOrigen):
             CreaTree(os.path.join(DirOrigen,ObjDestino),os.path.join(DirDestino,ObjDestino),obj)
+    cpStatDir(os.path.join(DirOrigen,ObjDestino),os.path.join(DirDestino,ObjDestino))
+
+def BorraTree(DirDestino,ObjDestino):
+
+    for obj in os.listdir(os.path.join(DirDestino,ObjDestino)):
+        FullNameOrigen = os.path.join(DirDestino,ObjDestino,obj)
+        if os.path.isfile(FullNameOrigen):
+            printMSG("        rm " + FullNameOrigen )
+            rmFile(FullNameOrigen)
+        if os.path.isdir(FullNameOrigen):
+            BorraTree(os.path.join(os.path.join(DirDestino,ObjDestino),obj))
+
+    printMSG("   CMD:")
+    printMSG("        rmdir " + os.path.join(DirDestino,ObjDestino))
+    rmDir(os.path.join(DirDestino,ObjDestino))
+
+def BuscaCambiosEnOrigen(DirOrigen):
+    global Id_Job
+
+    printMSG("Busca cambios en : [" + DirOrigen + "]" )
+    db = sqlite3.connect(database)
+    db.text_factory = str
+    db.row_factory = sqlite3.Row
+    cur = db.cursor()
+    cur.execute("""select IsDir,
+                    IsFile,
+                    NombreBaseOrigen,
+                    NombreOrigen,
+                    NombreBaseDestino,
+                    NombreDestino
+                    from Job_Det
+                    where Id_Job = ? """,(Id_Job,))
+    results = cur.fetchall()
+    for row in results:
+        FullNameOrigen = os.path.join(row["NombreBaseOrigen"],row["NombreOrigen"])
+        FullNameDestino = os.path.join(row["NombreBaseDestino"],row["NombreDestino"])
+        if row[1]:
+            if not os.path.isfile(FullNameOrigen):
+                printMSG("   Fil Origen : " + FullNameOrigen)
+                printMSG("   Fil Destino: " + FullNameDestino)
+                printMSG("   Tarea:")
+                printMSG("     - Archivo origen ya no existe, eliminar  -> [" + FullNameDestino + "]")
+                printMSG("   CMD:")
+                printMSG("        rm " + FullNameDestino)
+                rmFile(FullNameDestino)
+
+        if row[0]:
+            if not os.path.isdir(FullNameOrigen):
+                printMSG("   Dir Origen : [" + FullNameOrigen + "]")
+                printMSG("   Dir Destino: [" + FullNameDestino + "]")
+                printMSG("   Tarea:")
+                printMSG("     - Directorio ya no existe, eliminar -> " + FullNameDestino )
+                BorraTree(row["NombreBaseDestino"],row["NombreDestino"])
+    db.close()
+
+def cpFile(src,dst):
+    try:
+        shutil.copy2(src,dst)
+        printMSG("        Archivo " + src + " copiado." )
+    except shutil.Error as e:
+        printMSG("ERROR - cpFile: Archivo " + src + " no copiado. Error: %s" % e)
+
+def rmFile(src):
+    try:
+        os.remove(src)
+        printMSG("        Archivo " + src + " eliminado." )
+    except shutil.Error as e:
+        printMSG("ERROR - rmFile: Archivo " + src + " no eliminado. Error: %s" % e)
+
+def cpDir(src,dst):
+    try:
+        os.mkdir(dst)
+        shutil.copystat(src,dst)
+        printMSG("        Directorio " + src + " copiado." )
+    except shutil.Error as e:
+        printMSG("ERROR - cpDir: Directorio " + src + " no copiado. Error: %s" % e)
+
+def cpStatDir(src,dst):
+    try:
+        shutil.copystat(src,dst)
+        printMSG("        Directorio " + src + " metadata copiada." )
+    except shutil.Error as e:
+        printMSG("ERROR - cpStatDir: Directorio " + src + " metadata no copiada. Error: %s" % e)
+
+def rmDir(src):
+    try:
+        os.rmdir(src)
+        printMSG("        Directorio " + src + " eliminado." )
+    except shutil.Error as e:
+        printMSG("ERROR - rmDir: Directorio " + src + " no eliminado. Error: %s" % e)
 
 def Compara(DirOrigen,DirDestino):
     ''' Funcion que compara dos directorios recursivamente
@@ -90,6 +229,13 @@ def Compara(DirOrigen,DirDestino):
     for obj in os.listdir(DirOrigen):
         FullNameOrigen = os.path.join(DirOrigen,obj)
         FullNameDestino = os.path.join(DirDestino,obj)
+        InsertDet(
+            os.path.isdir(FullNameOrigen),
+            os.path.isfile(FullNameOrigen),
+            DirOrigen,
+            obj,
+            DirDestino,
+            obj)
         if os.path.isfile(FullNameOrigen):
             F_Origen = clsFile(DirOrigen,obj)
             printMSG("   Fil Origen : " + FullNameOrigen)
@@ -103,6 +249,7 @@ def Compara(DirOrigen,DirDestino):
                 printMSG("     - Archivo no existe, copiar a -> [" + DirDestino + "]")
                 printMSG("   CMD:")
                 printMSG("        cp " + FullNameOrigen + " " + DirDestino)
+                cpFile(FullNameOrigen,DirDestino)
             else:
                 F_Destino = clsFile(DirDestino,obj)
                 Copiar = False
@@ -131,6 +278,8 @@ def Compara(DirOrigen,DirDestino):
                 if Copiar:
                     printMSG("   CMD:")
                     printMSG("        cp " + FullNameOrigen + " " + DirDestino)
+                    rmFile(FullNameDestino)
+                    cpFile(FullNameOrigen,DirDestino)
 
         if os.path.isdir(os.path.join(DirOrigen,obj)):
             printMSG("   Dir Origen : [" + os.path.join(DirOrigen,obj) + "]")
@@ -146,7 +295,7 @@ def Compara(DirOrigen,DirDestino):
 
 
 def main():
-    global verbose, logfile , log, database
+    global verbose, logfile , log, database, LastSync
 
     logfile = os.path.join(os.path.dirname(os.path.realpath(sys.argv[0])),"SYNC-" + time.strftime("%Y-%m-%d") + ".log")
     database = os.path.join(os.path.dirname(os.path.realpath(sys.argv[0])),"sync.db")
@@ -160,26 +309,39 @@ def main():
     if not os.path.isfile(database):
         CreaDataBase()
 
+    DirOrigen = "C:\Datos Temporales\ASA2000"
+    DirDestino = "C:\DatosTemp\ASA2000"
+
+    GetJob(DirOrigen,DirDestino)
+    if LastSync != "":
+        printMSG("LAST SYNC   :" + LastSync)
+        if not verbose:
+            print "LAST SYNC   :" + LastSync
+
     start_time = time.time()
     strTime = time.strftime("%H:%M:%S")
     printMSG("INICIO SYNC :" + strTime)
     if not verbose:
         print "INICIO SYNC :" + strTime
 
-    DirOrigen = "C:\Datos Temporales\ASA2000"
-    DirDestino = "C:\DatosTemp\ASA2000"
+    if not FirstSync:
+        BuscaCambiosEnOrigen(DirOrigen)
+        BorraDet()
 
-    GetIdJob(DirOrigen,DirDestino)
     Compara(DirOrigen,DirDestino)
 
     elapsed_time = time.time() - start_time
     strTime = time.strftime("%H:%M:%S")
+    LastSync = time.strftime("%Y-%m-%d %H:%M:%S")
 
     printMSG("FIN SYNC     :" + strTime)
     printMSG("Tiempo       :" + str(elapsed_time))
     if not verbose:
         print "FIN SYNC    :" + strTime
         print "Tiempo      :" + str(elapsed_time)
+
+    UpdateLastSync()
+
     if log:
         print "Log generado:" + logfile
 
