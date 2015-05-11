@@ -6,6 +6,25 @@
 #
 # Created:     28/04/2015
 #-----------------------------------------------------------------------------------------------
+''' Módulo dirs para realizar operaciones basicas sobre archivos
+
+    Clases:
+        clsFile -> Manejo de archivos y propiedades basicas
+        clsDir  -> Manejo de Directorios y propiedades basicas
+
+    Funciones :
+        GetFileSizeStr(size, a_kilobyte_is_1024_bytes=True)
+        Get_Mod_Date(fil)
+        SearchInFiles(root,filter)
+'''
+__author__      = "William Lopez"
+__copyright__ = ""
+__credits__ = ["", "", "",""]
+__license__ = "GPL"
+__version__ = "1.0.0"
+__maintainer__ = "William Lopez"
+__email__ = "wlopez.a@gmail.com"
+__status__ = "Development"
 
 #-------------------------------------------------------------------------------
 #Importacion de Modulos

@@ -6,109 +6,57 @@
 #
 # Created:     03/05/2015
 #-------------------------------------------------------------------------------
+''' Módulo principal sync : Sincronizacion de archivos y directorios
+
+    Funciones:
+
+'''
+__author__      = "William Lopez"
+__copyright__ = ""
+__credits__ = ["", "", "",""]
+__license__ = "GPL"
+__version__ = "1.0.0"
+__maintainer__ = "William Lopez"
+__email__ = "wlopez.a@gmail.com"
+__status__ = "Development"
+
 #-------------------------------------------------------------------------------
 #Importacion de Modulos
 #-------------------------------------------------------------------------------
 import os
 import time
 import sys
-from filesys.dirs import clsFile
-import sqlite3
 import shutil
 
+from filesys.dirs import clsFile
+from db_utils.dbutils import clsSQLite
+from syncutils import CreaDataBase
+from syncutils import GetJob
+from syncutils import UpdateLastSync
+from syncutils import InsertDet
+from syncutils import BorraDet
+from syncutils import GetJob
+from syncutils import IsFirstSync
+from syncutils import GetLastSync
 #-------------------------------------------------------------------------------
 #Variables Globales
 #-------------------------------------------------------------------------------
 verbose = True
 log = True
 logfile = "sync-"
-database = "sync.db"
-Id_Job = 0
-LastSync=""
-FirstSync = True
 
 #-------------------------------------------------------------------------------
 #Definicion de Funciones
 #-------------------------------------------------------------------------------
-def CreaDataBase():
-    db = sqlite3.connect(database)
-    cur = db.cursor()
-    sql = "create table Job(Id_Job Int Not Null, DirOrigen Text Not Null, DirDestino Text Not Null,LastSync Text Null)"
-    cur.execute(sql)
-    sql = "create table Job_Det(Id_Job Int Not Null, IsDir Int Not Null, IsFile Int Not Null,"
-    sql += "NombreBaseOrigen Text Not Null,NombreOrigen Text Not Null,"
-    sql += "NombreBaseDestino Text Not Null,NombreDestino Text Not Null)"
-    cur.execute(sql)
-    db.commit()
-    db.close()
-
-def GetJob(DirOrigen,DirDestino):
-    global Id_Job,LastSync,FirstSync
-
-    db = sqlite3.connect(database)
-    cur = db.cursor()
-    cur.execute("""select count(Id_Job) from Job where DirOrigen = ? and DirDestino = ? """,(DirOrigen,DirDestino))
-    count = cur.fetchone()[0]
-    if count==0:
-        Id_Job = 1
-        FirstSync = True
-        cur.execute("""Insert into Job (Id_Job,DirOrigen,DirDestino) Values(?,?,?)""",(Id_Job,DirOrigen,DirDestino))
-        db.commit()
-    else:
-        FirstSync = False
-        cur.execute("""select Id_Job,LastSync from Job where DirOrigen = ? and DirDestino = ? """,(DirOrigen,DirDestino))
-        row = cur.fetchone()
-        Id_Job = row[0]
-        if row[1] != "None":
-            LastSync = row[1]
-    db.close()
-
-def UpdateLastSync():
-    global Id_Job, LastSync
-
-    db = sqlite3.connect(database)
-    cur = db.cursor()
-    cur.execute("""Update Job Set LastSync = ? where Id_Job = ? """,(LastSync,Id_Job))
-    db.commit()
-    db.close()
-
-def InsertDet(IsDir,IsFile,NombreBaseOrigen,NombreOrigen,NombreBaseDestino,NombreDestino):
-    global Id_Job
-    try:
-        db = sqlite3.connect(database)
-        cur = db.cursor()
-        db.text_factory = str
-        cur.execute("""Insert into Job_Det (
-                        Id_Job,
-                        IsDir,
-                        IsFile,
-                        NombreBaseOrigen,
-                        NombreOrigen,
-                        NombreBaseDestino,
-                        NombreDestino)
-                        Values (?,?,?,?,?,?,?) """,
-                        (Id_Job,IsDir,IsFile,NombreBaseOrigen,NombreOrigen,NombreBaseDestino,NombreDestino))
-        db.commit()
-    except sqlite3.Error, e:
-        print "Error %s:" % e.args[0]
-
-    db.close()
-
-def BorraDet():
-    global Id_Job
-
-    db = sqlite3.connect(database)
-    cur = db.cursor()
-    cur.execute("""Delete from Job_Det Where Id_Job = ? """ , (Id_Job,))
-    db.commit()
-    db.close()
-
 def CreaLog():
+    ''' Funcion para crear el log del modulo '''
     FLog = open(logfile,"w")
     FLog.write("Log: " + os.path.basename( sys.argv[0] + "\n"))
     FLog.close
 
 def printMSG(msg):
+    ''' Funcion para escribir los mensajes del modulo, si verbose es True los mensajes son
+    escritos en pantalla. Si log es True los mensajes son escritos en el log '''
     global verbose
     if verbose:
         print msg
@@ -118,6 +66,16 @@ def printMSG(msg):
         Flog.close
 
 def CreaTree(DirOrigen,DirDestino,ObjDestino):
+    ''' Crea recursivamente el arbol de directorios en DirDestino y copia todos los archivos
+    de DirOrigen a DirDestino
+
+    Argumentos:
+        DirOrigen <string>      : Path base del directorio origen
+        DirDestino <string>     : Path base del directorio destino a sincronizar
+        ObjDestino <string>     : Contiene el nombre del directorio o el nombre del archivo
+                                    FullPathOrigen  = DirOrigen + ObjDestino
+                                    FullPathDestino = DirDestino + ObjDestino
+    '''
     printMSG("   CMD:")
     printMSG("        mkdir " + os.path.join(DirDestino,ObjDestino))
     cpDir(os.path.join(DirOrigen,ObjDestino),os.path.join(DirDestino,ObjDestino))
@@ -131,7 +89,13 @@ def CreaTree(DirOrigen,DirDestino,ObjDestino):
     cpStatDir(os.path.join(DirOrigen,ObjDestino),os.path.join(DirDestino,ObjDestino))
 
 def BorraTree(DirDestino,ObjDestino):
+    ''' Borra recursivamente el arbol de directorios en DirDestino y todos sus archivos
 
+    Argumentos:
+        DirDestino <string>     : Path base del directorio destino a sincronizar
+        ObjDestino <string>     : Contiene el nombre del directorio o el nombre del archivo
+                                    FullPathDestino = DirDestino + ObjDestino
+    '''
     for obj in os.listdir(os.path.join(DirDestino,ObjDestino)):
         FullNameOrigen = os.path.join(DirDestino,ObjDestino,obj)
         if os.path.isfile(FullNameOrigen):
@@ -144,15 +108,18 @@ def BorraTree(DirDestino,ObjDestino):
     printMSG("        rmdir " + os.path.join(DirDestino,ObjDestino))
     rmDir(os.path.join(DirDestino,ObjDestino))
 
-def BuscaCambiosEnOrigen(DirOrigen):
-    global Id_Job
+def BuscaCambiosEnOrigen(database,Id_Job,DirOrigen):
+    ''' Busca los cambios realizados en DirOrigen desde la ultima sincronizacion. Si encuentra que un
+    archivo y/o directorio fue eliminado replica la eliminacion en DirDestino.
 
+    Argumentos:
+        database <string>       : Path y nombre de la base de datos sqlite3
+        Id_Job <int>            : Id del Job de sincronizacion
+        DirOrigen <string>      : Path base del directorio origen
+    '''
     printMSG("Busca cambios en : [" + DirOrigen + "]" )
-    db = sqlite3.connect(database)
-    db.text_factory = str
-    db.row_factory = sqlite3.Row
-    cur = db.cursor()
-    cur.execute("""select IsDir,
+    db = clsSQLite(database)
+    results = db.getresults("""select IsDir,
                     IsFile,
                     NombreBaseOrigen,
                     NombreOrigen,
@@ -160,7 +127,6 @@ def BuscaCambiosEnOrigen(DirOrigen):
                     NombreDestino
                     from Job_Det
                     where Id_Job = ? """,(Id_Job,))
-    results = cur.fetchall()
     for row in results:
         FullNameOrigen = os.path.join(row["NombreBaseOrigen"],row["NombreOrigen"])
         FullNameDestino = os.path.join(row["NombreBaseDestino"],row["NombreDestino"])
@@ -181,9 +147,14 @@ def BuscaCambiosEnOrigen(DirOrigen):
                 printMSG("   Tarea:")
                 printMSG("     - Directorio ya no existe, eliminar -> " + FullNameDestino )
                 BorraTree(row["NombreBaseDestino"],row["NombreDestino"])
-    db.close()
 
 def cpFile(src,dst):
+    ''' Copia archivo src a dst
+
+    Argumentos:
+        src <string>    : Fullpath del archivo origen
+        dst <string>    : Fullpath donde sera copiado el archivo
+    '''
     try:
         shutil.copy2(src,dst)
         printMSG("        Archivo " + src + " copiado." )
@@ -191,6 +162,11 @@ def cpFile(src,dst):
         printMSG("ERROR - cpFile: Archivo " + src + " no copiado. Error: %s" % e)
 
 def rmFile(src):
+    ''' Elimina el archivo src
+
+    Argumentos:
+        src <string>    : Fullpath del archivo a eliminar
+    '''
     try:
         os.remove(src)
         printMSG("        Archivo " + src + " eliminado." )
@@ -198,6 +174,14 @@ def rmFile(src):
         printMSG("ERROR - rmFile: Archivo " + src + " no eliminado. Error: %s" % e)
 
 def cpDir(src,dst):
+    ''' Copia el directorio src a dst. El copiado se realiza de la siguiente forma: 1. Crea el directorio
+    en dst y 2. Copia la metadata de Fecha de creación y permisos al directorio creado para ambos tanto el
+    origen como el destino tengan la misma data.
+
+    Argumentos:
+        src <string>    : Fullpath del directorio origen
+        dst <string>    : Fulppath del directorio destino
+    '''
     try:
         os.mkdir(dst)
         shutil.copystat(src,dst)
@@ -206,6 +190,12 @@ def cpDir(src,dst):
         printMSG("ERROR - cpDir: Directorio " + src + " no copiado. Error: %s" % e)
 
 def cpStatDir(src,dst):
+    ''' Copia los metadatos como Fecha de Creacion, modificacion y permisos del directorio src al dst
+
+    Argumentos:
+        src <string>    : Fullpath del directorio origen
+        dst <string>    : Fullpath del directorio destino
+    '''
     try:
         shutil.copystat(src,dst)
         printMSG("        Directorio " + src + " metadata copiada." )
@@ -213,14 +203,25 @@ def cpStatDir(src,dst):
         printMSG("ERROR - cpStatDir: Directorio " + src + " metadata no copiada. Error: %s" % e)
 
 def rmDir(src):
+    ''' Elimina el directorio src
+
+    Argumentos:
+        src <string>    : Fullpath del directorio a eliminar
+    '''
     try:
         os.rmdir(src)
         printMSG("        Directorio " + src + " eliminado." )
     except shutil.Error as e:
         printMSG("ERROR - rmDir: Directorio " + src + " no eliminado. Error: %s" % e)
 
-def Compara(DirOrigen,DirDestino):
-    ''' Funcion que compara dos directorios recursivamente
+def Compara(DirOrigen,DirDestino,database,Id_Job):
+    ''' Funcion que compara dos directorios recursivamente.
+
+    Argumentos:
+        DirOrigen <string>      : Fullpath del directorio origen. Directorio master.
+        DirDestino <string>     : Fullpath del directorio a sincronizar. Directorio replicado
+        database <stirng>       : Fullpath y nombre de la base de datos sqlite3
+        Id_Job <int>            : Id del Job de sincronizacion
     '''
     if not os.path.isdir(DirOrigen):
         printMSG(DirOrigen + " no es un directorio o no existe !!!")
@@ -229,7 +230,7 @@ def Compara(DirOrigen,DirDestino):
     for obj in os.listdir(DirOrigen):
         FullNameOrigen = os.path.join(DirOrigen,obj)
         FullNameDestino = os.path.join(DirDestino,obj)
-        InsertDet(
+        InsertDet(database,Id_Job,
             os.path.isdir(FullNameOrigen),
             os.path.isfile(FullNameOrigen),
             DirOrigen,
@@ -290,12 +291,12 @@ def Compara(DirOrigen,DirDestino):
                 CreaTree(DirOrigen,DirDestino,obj)
             else:
                 printMSG("     - Directorio existe, revisar -> [" + os.path.join(DirOrigen,obj) + "]   &   [" + os.path.join(DirDestino,obj) + "]")
-                Compara(os.path.join(DirOrigen,obj),os.path.join(DirDestino,obj))
+                Compara(os.path.join(DirOrigen,obj),os.path.join(DirDestino,obj),database,Id_Job)
 
 
 
 def main():
-    global verbose, logfile , log, database, LastSync
+    global verbose, logfile , log
 
     logfile = os.path.join(os.path.dirname(os.path.realpath(sys.argv[0])),"SYNC-" + time.strftime("%Y-%m-%d") + ".log")
     database = os.path.join(os.path.dirname(os.path.realpath(sys.argv[0])),"sync.db")
@@ -306,13 +307,19 @@ def main():
     if log:
         CreaLog()
 
-    if not os.path.isfile(database):
-        CreaDataBase()
-
     DirOrigen = "C:\Datos Temporales\ASA2000"
     DirDestino = "C:\DatosTemp\ASA2000"
 
-    GetJob(DirOrigen,DirDestino)
+    if not os.path.isfile(database):
+        CreaDataBase(database)
+        LastSync=""
+        FirstSync = True
+    else:
+        FirstSync = IsFirstSync(database,DirOrigen,DirDestino)
+        LastSync = GetLastSync(database,DirOrigen,DirDestino)
+
+    Id_Job = GetJob(database,DirOrigen,DirDestino)
+
     if LastSync != "":
         printMSG("LAST SYNC   :" + LastSync)
         if not verbose:
@@ -325,10 +332,10 @@ def main():
         print "INICIO SYNC :" + strTime
 
     if not FirstSync:
-        BuscaCambiosEnOrigen(DirOrigen)
-        BorraDet()
+        BuscaCambiosEnOrigen(database,Id_Job,DirOrigen)
+        BorraDet(database,Id_Job)
 
-    Compara(DirOrigen,DirDestino)
+    Compara(DirOrigen,DirDestino,database,Id_Job)
 
     elapsed_time = time.time() - start_time
     strTime = time.strftime("%H:%M:%S")
@@ -340,7 +347,7 @@ def main():
         print "FIN SYNC    :" + strTime
         print "Tiempo      :" + str(elapsed_time)
 
-    UpdateLastSync()
+    UpdateLastSync(database,Id_Job,LastSync)
 
     if log:
         print "Log generado:" + logfile
